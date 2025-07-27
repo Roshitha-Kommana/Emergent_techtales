@@ -12,6 +12,7 @@ from datetime import datetime
 import asyncio
 import base64
 import json
+import aiohttp
 
 # Import emergent integrations
 from emergentintegrations.llm.chat import LlmChat, UserMessage
