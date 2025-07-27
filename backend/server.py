@@ -116,9 +116,17 @@ Focus on making the story engaging and the visual cues very specific."""
             response = await chat.send_message(user_message)
             logger.info(f"Story response: {response}")
             
-            # Parse the JSON response
+            # Parse the JSON response (handle markdown code blocks)
             try:
-                parsed_response = json.loads(response)
+                # Clean the response - remove markdown code blocks if present
+                clean_response = response.strip()
+                if clean_response.startswith('```json'):
+                    clean_response = clean_response[7:]  # Remove ```json
+                if clean_response.endswith('```'):
+                    clean_response = clean_response[:-3]  # Remove ```
+                clean_response = clean_response.strip()
+                
+                parsed_response = json.loads(clean_response)
                 return StoryResponse(
                     story=parsed_response["story"],
                     visual_cues=parsed_response["visual_cues"]
