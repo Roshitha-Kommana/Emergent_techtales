@@ -143,26 +143,45 @@ Focus on making the story engaging and the visual cues very specific."""
             raise HTTPException(status_code=500, detail=f"Story generation failed: {str(e)}")
 
 class ImageAgent:
-    def __init__(self, api_key: str = None):
-        self.api_key = api_key
+    def __init__(self, hf_api_key: str = None):
+        self.hf_api_key = hf_api_key
+        self.hf_api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+        self.headers = {"Authorization": f"Bearer {hf_api_key}"} if hf_api_key else {}
     
     async def generate_images(self, visual_cues: List[str]) -> ImageResponse:
-        """Generate images based on visual cues using free image generation"""
+        """Generate images using Hugging Face Stable Diffusion with PIL fallback"""
         try:
             images = []
             
-            # Generate educational diagram images
-            for i, cue in enumerate(visual_cues[:3]):
-                try:
-                    # Create educational diagram image
-                    image_base64 = await self.create_educational_diagram(cue, i)
-                    if image_base64:
-                        images.append(image_base64)
-                        logger.info(f"Generated educational diagram for cue: {cue}")
+            # Use aiohttp session for better performance
+            async with aiohttp.ClientSession() as session:
+                for i, cue in enumerate(visual_cues[:3]):  # Generate max 3 images
+                    try:
+                        # Try Hugging Face AI generation first
+                        if self.hf_api_key:
+                            hf_image = await self.generate_hf_image(session, cue)
+                            if hf_image:
+                                images.append(hf_image)
+                                logger.info(f"Generated AI image for cue: {cue}")
+                                continue
                         
-                except Exception as e:
-                    logger.error(f"Image generation error for cue '{cue}': {str(e)}")
-                    continue
+                        # Fallback to PIL educational diagram
+                        pil_image = await self.create_educational_diagram(cue, i)
+                        if pil_image:
+                            images.append(pil_image)
+                            logger.info(f"Generated PIL diagram for cue: {cue}")
+                            
+                    except Exception as e:
+                        logger.error(f"Image generation error for cue '{cue}': {str(e)}")
+                        # Try PIL fallback even if HF fails
+                        try:
+                            pil_image = await self.create_educational_diagram(cue, i)
+                            if pil_image:
+                                images.append(pil_image)
+                                logger.info(f"Generated PIL fallback for cue: {cue}")
+                        except Exception as pil_e:
+                            logger.error(f"PIL fallback also failed for cue '{cue}': {str(pil_e)}")
+                            continue
                     
             return ImageResponse(images=images)
             
@@ -170,14 +189,72 @@ class ImageAgent:
             logger.error(f"Image generation error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
     
+    async def generate_hf_image(self, session: aiohttp.ClientSession, cue: str) -> str:
+        """Generate image using Hugging Face Stable Diffusion"""
+        try:
+            # Create detailed prompt for educational content
+            prompt = f"Educational illustration for computer science learning: {cue}. Professional digital art style, clean and modern design, vibrant colors, suitable for educational materials, high quality, detailed diagram"
+            
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "num_inference_steps": 25,
+                    "guidance_scale": 8.0,
+                    "width": 768,
+                    "height": 512,
+                    "seed": 42
+                }
+            }
+            
+            async with session.post(
+                self.hf_api_url,
+                headers=self.headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                
+                if response.status == 200:
+                    image_bytes = await response.read()
+                    # Convert to base64
+                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                    return image_base64
+                elif response.status == 503:
+                    # Model is loading, wait and retry once
+                    logger.warning(f"HF model loading for cue '{cue}', retrying in 20 seconds...")
+                    await asyncio.sleep(20)
+                    
+                    # Retry once
+                    async with session.post(
+                        self.hf_api_url,
+                        headers=self.headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=60)
+                    ) as retry_response:
+                        
+                        if retry_response.status == 200:
+                            image_bytes = await retry_response.read()
+                            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                            return image_base64
+                        else:
+                            logger.error(f"HF retry failed for cue '{cue}': {retry_response.status}")
+                            return None
+                else:
+                    response_text = await response.text()
+                    logger.error(f"HF image generation failed for cue '{cue}': {response.status} - {response_text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"HF image generation error for cue '{cue}': {str(e)}")
+            return None
+    
     async def create_educational_diagram(self, cue: str, index: int) -> str:
-        """Create educational diagram using PIL"""
+        """Create educational diagram using PIL (fallback)"""
         try:
             from PIL import Image, ImageDraw, ImageFont
             import io
             
             # Create image
-            width, height = 512, 384
+            width, height = 768, 512
             colors = [
                 ('#4A90E2', '#FFFFFF'),  # Blue
                 ('#5CB85C', '#FFFFFF'),  # Green  
@@ -190,7 +267,7 @@ class ImageAgent:
             img = Image.new('RGB', (width, height), bg_color)
             draw = ImageDraw.Draw(img)
             
-            # Try to use a default font, fallback to default
+            # Try to use a default font
             try:
                 font = ImageFont.load_default()
             except:
@@ -234,40 +311,62 @@ class ImageAgent:
                 draw.text((line_x, y_offset), line, fill=text_color, font=font)
                 y_offset += 25
             
-            # Draw simple diagram elements
-            center_x, center_y = width // 2, height // 2 + 20
+            # Draw diagram elements based on content
+            center_x, center_y = width // 2, height // 2 + 40
             
-            # Draw some basic shapes for educational purposes
             if 'layer' in cue.lower() or 'osi' in cue.lower():
-                # Draw layers
+                # Draw OSI layers
+                layer_height = 25
+                layer_width = 200
                 for i in range(4):
-                    y = center_y + (i * 30) - 60
-                    draw.rectangle([center_x - 100, y, center_x + 100, y + 25], 
+                    y = center_y + (i * 35) - 70
+                    draw.rectangle([center_x - layer_width//2, y, center_x + layer_width//2, y + layer_height], 
                                  outline=text_color, width=2)
-                    draw.text((center_x - 90, y + 5), f"Layer {i+1}", fill=text_color, font=font)
+                    draw.text((center_x - layer_width//2 + 10, y + 5), f"Layer {i+1}", fill=text_color, font=font)
                                  
             elif 'network' in cue.lower():
-                # Draw network nodes
+                # Draw network topology
+                node_radius = 30
                 for i in range(3):
-                    x = center_x + (i - 1) * 80
-                    draw.ellipse([x - 25, center_y - 25, x + 25, center_y + 25], 
+                    x = center_x + (i - 1) * 120
+                    draw.ellipse([x - node_radius, center_y - node_radius, x + node_radius, center_y + node_radius], 
                                outline=text_color, width=2)
-                    draw.text((x - 10, center_y - 5), f"N{i+1}", fill=text_color, font=font)
+                    draw.text((x - 15, center_y - 5), f"Node {i+1}", fill=text_color, font=font)
+                    
+                    # Draw connections
+                    if i < 2:
+                        draw.line([x + node_radius, center_y, x + 120 - node_radius, center_y], 
+                                fill=text_color, width=2)
                     
             elif 'data' in cue.lower() or 'database' in cue.lower():
-                # Draw database cylinder
-                draw.ellipse([center_x - 40, center_y - 60, center_x + 40, center_y - 40], 
+                # Draw database symbol
+                db_width = 80
+                db_height = 100
+                ellipse_height = 20
+                
+                # Top ellipse
+                draw.ellipse([center_x - db_width//2, center_y - db_height//2, 
+                            center_x + db_width//2, center_y - db_height//2 + ellipse_height], 
                            outline=text_color, width=2)
-                draw.rectangle([center_x - 40, center_y - 50, center_x + 40, center_y + 10], 
+                
+                # Cylinder body
+                draw.rectangle([center_x - db_width//2, center_y - db_height//2 + ellipse_height//2, 
+                              center_x + db_width//2, center_y + db_height//2 - ellipse_height//2], 
                              outline=text_color, width=2)
-                draw.ellipse([center_x - 40, center_y, center_x + 40, center_y + 20], 
+                
+                # Bottom ellipse
+                draw.ellipse([center_x - db_width//2, center_y + db_height//2 - ellipse_height, 
+                            center_x + db_width//2, center_y + db_height//2], 
                            outline=text_color, width=2)
                            
             else:
-                # Draw generic diagram
-                draw.rectangle([center_x - 60, center_y - 40, center_x + 60, center_y + 40], 
+                # Draw generic concept box
+                box_width = 150
+                box_height = 80
+                draw.rectangle([center_x - box_width//2, center_y - box_height//2, 
+                              center_x + box_width//2, center_y + box_height//2], 
                              outline=text_color, width=2)
-                draw.text((center_x - 20, center_y - 5), "Concept", fill=text_color, font=font)
+                draw.text((center_x - 30, center_y - 5), "Concept", fill=text_color, font=font)
             
             # Convert to base64
             buffer = io.BytesIO()
@@ -278,7 +377,7 @@ class ImageAgent:
             return image_base64
             
         except Exception as e:
-            logger.error(f"Educational diagram creation error: {str(e)}")
+            logger.error(f"PIL diagram creation error: {str(e)}")
             return None
 
 class QuizAgent:
