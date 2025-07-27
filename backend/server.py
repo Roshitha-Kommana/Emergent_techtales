@@ -15,7 +15,6 @@ import json
 
 # Import emergent integrations
 from emergentintegrations.llm.chat import LlmChat, UserMessage
-from emergentintegrations.llm.gemeni.image_generation import GeminiImageGeneration
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
