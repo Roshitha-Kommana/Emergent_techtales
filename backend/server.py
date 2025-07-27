@@ -144,80 +144,60 @@ Focus on making the story engaging and the visual cues very specific."""
 class ImageAgent:
     def __init__(self, api_key: str = None):
         self.api_key = api_key
-        self.hf_api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-        # For free tier, we can use without auth or with a free token
-        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key and api_key != "hf_dummy_token_for_free_inference" else {}
+        # Using a simpler, free image generation service
+        self.hf_api_url = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
     
     async def generate_images(self, visual_cues: List[str]) -> ImageResponse:
-        """Generate images based on visual cues using Hugging Face Stable Diffusion"""
+        """Generate images based on visual cues using alternative free method"""
         try:
             images = []
             
-            # Use a session for better performance
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                for cue in visual_cues[:3]:  # Generate max 3 images
-                    try:
-                        # Generate image prompt
-                        prompt = f"Educational illustration: {cue}. Style: clean, modern, colorful, suitable for learning materials. High quality digital art, vector style, professional diagram"
+            # Alternative approach: Generate placeholder images with text
+            # This ensures the UI works while we find a better free solution
+            for i, cue in enumerate(visual_cues[:3]):
+                try:
+                    # Create a simple placeholder image using a web service
+                    placeholder_image = await self.generate_placeholder_image(cue, i)
+                    if placeholder_image:
+                        images.append(placeholder_image)
+                        logger.info(f"Generated placeholder image for cue: {cue}")
                         
-                        payload = {
-                            "inputs": prompt,
-                            "parameters": {
-                                "num_inference_steps": 20,
-                                "guidance_scale": 7.5,
-                                "width": 512,
-                                "height": 512
-                            }
-                        }
-                        
-                        # Make request to Hugging Face API
-                        async with session.post(
-                            self.hf_api_url,
-                            headers=self.headers,
-                            json=payload,
-                            timeout=aiohttp.ClientTimeout(total=60)
-                        ) as response:
-                            
-                            if response.status == 200:
-                                image_bytes = await response.read()
-                                # Convert to base64
-                                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                                images.append(image_base64)
-                                logger.info(f"Generated image for cue: {cue}")
-                            elif response.status == 503:
-                                # Model is loading, wait and retry
-                                logger.warning(f"Model loading for cue '{cue}', retrying in 20 seconds...")
-                                await asyncio.sleep(20)
-                                
-                                # Retry once
-                                async with session.post(
-                                    self.hf_api_url,
-                                    headers=self.headers,
-                                    json=payload,
-                                    timeout=aiohttp.ClientTimeout(total=60)
-                                ) as retry_response:
-                                    
-                                    if retry_response.status == 200:
-                                        image_bytes = await retry_response.read()
-                                        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                                        images.append(image_base64)
-                                        logger.info(f"Generated image for cue (retry): {cue}")
-                                    else:
-                                        logger.error(f"Retry failed for cue '{cue}': {retry_response.status}")
-                            else:
-                                response_text = await response.text()
-                                logger.error(f"Image generation failed for cue '{cue}': {response.status} - {response_text}")
-                                
-                    except Exception as e:
-                        logger.error(f"Image generation error for cue '{cue}': {str(e)}")
-                        continue
-                        
+                except Exception as e:
+                    logger.error(f"Image generation error for cue '{cue}': {str(e)}")
+                    continue
+                    
             return ImageResponse(images=images)
             
         except Exception as e:
             logger.error(f"Image generation error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+    
+    async def generate_placeholder_image(self, cue: str, index: int) -> str:
+        """Generate a placeholder image using a free service"""
+        try:
+            import aiohttp
+            
+            # Using a free placeholder service that generates images with text
+            # This is a working free alternative until we get proper image generation
+            width, height = 512, 512
+            
+            # Create a URL for placeholder image with the cue text
+            placeholder_url = f"https://via.placeholder.com/{width}x{height}/4A90E2/FFFFFF?text={cue.replace(' ', '+')}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(placeholder_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        image_bytes = await response.read()
+                        # Convert to base64
+                        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                        return image_base64
+                    else:
+                        logger.error(f"Placeholder generation failed: {response.status}")
+                        return None
+                        
+        except Exception as e:
+            logger.error(f"Placeholder generation error: {str(e)}")
+            return None
 
 class QuizAgent:
     def __init__(self, api_key: str):
