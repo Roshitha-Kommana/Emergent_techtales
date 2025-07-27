@@ -145,35 +145,73 @@ Focus on making the story engaging and the visual cues very specific."""
 class ImageAgent:
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.image_gen = GeminiImageGeneration(api_key=api_key)
+        self.hf_api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+        self.headers = {"Authorization": f"Bearer {api_key}"}
     
     async def generate_images(self, visual_cues: List[str]) -> ImageResponse:
-        """Generate images based on visual cues"""
+        """Generate images based on visual cues using Hugging Face Stable Diffusion"""
         try:
             images = []
-            for cue in visual_cues[:3]:  # Generate max 3 images
-                try:
-                    # Generate image prompt
-                    prompt = f"Educational illustration: {cue}. Style: clean, modern, colorful, suitable for learning materials. High quality digital art."
-                    
-                    generated_images = await self.image_gen.generate_images(
-                        prompt=prompt,
-                        model="imagen-3.0-generate-002",
-                        number_of_images=1
-                    )
-                    
-                    if generated_images and len(generated_images) > 0:
-                        # Convert to base64
-                        image_base64 = base64.b64encode(generated_images[0]).decode('utf-8')
-                        images.append(image_base64)
-                        logger.info(f"Generated image for cue: {cue}")
-                    else:
-                        logger.warning(f"No image generated for cue: {cue}")
+            
+            # Use a session for better performance
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                for cue in visual_cues[:3]:  # Generate max 3 images
+                    try:
+                        # Generate image prompt
+                        prompt = f"Educational illustration: {cue}. Style: clean, modern, colorful, suitable for learning materials. High quality digital art, vector style, professional diagram"
                         
-                except Exception as e:
-                    logger.error(f"Image generation error for cue '{cue}': {str(e)}")
-                    continue
-                    
+                        payload = {
+                            "inputs": prompt,
+                            "parameters": {
+                                "num_inference_steps": 20,
+                                "guidance_scale": 7.5,
+                                "width": 512,
+                                "height": 512
+                            }
+                        }
+                        
+                        # Make request to Hugging Face API
+                        async with session.post(
+                            self.hf_api_url,
+                            headers=self.headers,
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=30)
+                        ) as response:
+                            
+                            if response.status == 200:
+                                image_bytes = await response.read()
+                                # Convert to base64
+                                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                                images.append(image_base64)
+                                logger.info(f"Generated image for cue: {cue}")
+                            elif response.status == 503:
+                                # Model is loading, wait and retry
+                                logger.warning(f"Model loading for cue '{cue}', retrying in 10 seconds...")
+                                await asyncio.sleep(10)
+                                
+                                # Retry once
+                                async with session.post(
+                                    self.hf_api_url,
+                                    headers=self.headers,
+                                    json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=30)
+                                ) as retry_response:
+                                    
+                                    if retry_response.status == 200:
+                                        image_bytes = await retry_response.read()
+                                        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                                        images.append(image_base64)
+                                        logger.info(f"Generated image for cue (retry): {cue}")
+                                    else:
+                                        logger.error(f"Retry failed for cue '{cue}': {retry_response.status}")
+                            else:
+                                logger.error(f"Image generation failed for cue '{cue}': {response.status}")
+                                
+                    except Exception as e:
+                        logger.error(f"Image generation error for cue '{cue}': {str(e)}")
+                        continue
+                        
             return ImageResponse(images=images)
             
         except Exception as e:
