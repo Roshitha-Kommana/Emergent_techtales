@@ -301,12 +301,8 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY environment variable is required")
 
-# For image generation, we'll use a free Hugging Face token
-# This is a dummy token for the free tier - no authentication required for public models
-HF_TOKEN = "hf_dummy_token_for_free_inference"
-
 story_agent = StoryAgent(GEMINI_API_KEY)
-image_agent = ImageAgent(HF_TOKEN)  # Use HF token for free image generation
+image_agent = ImageAgent()  # Using free Hugging Face API (no auth required for public models)
 quiz_agent = QuizAgent(GEMINI_API_KEY)
 
 # API Routes
