@@ -144,23 +144,20 @@ Focus on making the story engaging and the visual cues very specific."""
 class ImageAgent:
     def __init__(self, api_key: str = None):
         self.api_key = api_key
-        # Using a simpler, free image generation service
-        self.hf_api_url = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
     
     async def generate_images(self, visual_cues: List[str]) -> ImageResponse:
-        """Generate images based on visual cues using alternative free method"""
+        """Generate images based on visual cues using free image generation"""
         try:
             images = []
             
-            # Alternative approach: Generate placeholder images with text
-            # This ensures the UI works while we find a better free solution
+            # Generate educational diagram images
             for i, cue in enumerate(visual_cues[:3]):
                 try:
-                    # Create a simple placeholder image using a web service
-                    placeholder_image = await self.generate_placeholder_image(cue, i)
-                    if placeholder_image:
-                        images.append(placeholder_image)
-                        logger.info(f"Generated placeholder image for cue: {cue}")
+                    # Create educational diagram image
+                    image_base64 = await self.create_educational_diagram(cue, i)
+                    if image_base64:
+                        images.append(image_base64)
+                        logger.info(f"Generated educational diagram for cue: {cue}")
                         
                 except Exception as e:
                     logger.error(f"Image generation error for cue '{cue}': {str(e)}")
@@ -172,31 +169,115 @@ class ImageAgent:
             logger.error(f"Image generation error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
     
-    async def generate_placeholder_image(self, cue: str, index: int) -> str:
-        """Generate a placeholder image using a free service"""
+    async def create_educational_diagram(self, cue: str, index: int) -> str:
+        """Create educational diagram using PIL"""
         try:
-            import aiohttp
+            from PIL import Image, ImageDraw, ImageFont
+            import io
             
-            # Using a free placeholder service that generates images with text
-            # This is a working free alternative until we get proper image generation
-            width, height = 512, 512
+            # Create image
+            width, height = 512, 384
+            colors = [
+                ('#4A90E2', '#FFFFFF'),  # Blue
+                ('#5CB85C', '#FFFFFF'),  # Green  
+                ('#F0AD4E', '#FFFFFF'),  # Orange
+            ]
             
-            # Create a URL for placeholder image with the cue text
-            placeholder_url = f"https://via.placeholder.com/{width}x{height}/4A90E2/FFFFFF?text={cue.replace(' ', '+')}"
+            bg_color, text_color = colors[index % len(colors)]
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(placeholder_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status == 200:
-                        image_bytes = await response.read()
-                        # Convert to base64
-                        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                        return image_base64
+            # Create image
+            img = Image.new('RGB', (width, height), bg_color)
+            draw = ImageDraw.Draw(img)
+            
+            # Try to use a default font, fallback to default
+            try:
+                font = ImageFont.load_default()
+            except:
+                font = None
+            
+            # Draw title
+            title = f"Educational Diagram {index + 1}"
+            title_bbox = draw.textbbox((0, 0), title, font=font)
+            title_width = title_bbox[2] - title_bbox[0]
+            title_x = (width - title_width) // 2
+            draw.text((title_x, 30), title, fill=text_color, font=font)
+            
+            # Draw cue text (wrapped)
+            words = cue.split()
+            lines = []
+            current_line = []
+            
+            for word in words:
+                test_line = ' '.join(current_line + [word])
+                test_bbox = draw.textbbox((0, 0), test_line, font=font)
+                test_width = test_bbox[2] - test_bbox[0]
+                
+                if test_width <= width - 40:  # 20px margin on each side
+                    current_line.append(word)
+                else:
+                    if current_line:
+                        lines.append(' '.join(current_line))
+                        current_line = [word]
                     else:
-                        logger.error(f"Placeholder generation failed: {response.status}")
-                        return None
-                        
+                        lines.append(word)
+            
+            if current_line:
+                lines.append(' '.join(current_line))
+            
+            # Draw wrapped text
+            y_offset = 80
+            for line in lines:
+                line_bbox = draw.textbbox((0, 0), line, font=font)
+                line_width = line_bbox[2] - line_bbox[0]
+                line_x = (width - line_width) // 2
+                draw.text((line_x, y_offset), line, fill=text_color, font=font)
+                y_offset += 25
+            
+            # Draw simple diagram elements
+            center_x, center_y = width // 2, height // 2 + 20
+            
+            # Draw some basic shapes for educational purposes
+            if 'layer' in cue.lower() or 'osi' in cue.lower():
+                # Draw layers
+                for i in range(4):
+                    y = center_y + (i * 30) - 60
+                    draw.rectangle([center_x - 100, y, center_x + 100, y + 25], 
+                                 outline=text_color, width=2)
+                    draw.text((center_x - 90, y + 5), f"Layer {i+1}", fill=text_color, font=font)
+                                 
+            elif 'network' in cue.lower():
+                # Draw network nodes
+                for i in range(3):
+                    x = center_x + (i - 1) * 80
+                    draw.ellipse([x - 25, center_y - 25, x + 25, center_y + 25], 
+                               outline=text_color, width=2)
+                    draw.text((x - 10, center_y - 5), f"N{i+1}", fill=text_color, font=font)
+                    
+            elif 'data' in cue.lower() or 'database' in cue.lower():
+                # Draw database cylinder
+                draw.ellipse([center_x - 40, center_y - 60, center_x + 40, center_y - 40], 
+                           outline=text_color, width=2)
+                draw.rectangle([center_x - 40, center_y - 50, center_x + 40, center_y + 10], 
+                             outline=text_color, width=2)
+                draw.ellipse([center_x - 40, center_y, center_x + 40, center_y + 20], 
+                           outline=text_color, width=2)
+                           
+            else:
+                # Draw generic diagram
+                draw.rectangle([center_x - 60, center_y - 40, center_x + 60, center_y + 40], 
+                             outline=text_color, width=2)
+                draw.text((center_x - 20, center_y - 5), "Concept", fill=text_color, font=font)
+            
+            # Convert to base64
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            buffer.seek(0)
+            image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            return image_base64
+            
         except Exception as e:
-            logger.error(f"Placeholder generation error: {str(e)}")
+            logger.error(f"Educational diagram creation error: {str(e)}")
             return None
 
 class QuizAgent:
