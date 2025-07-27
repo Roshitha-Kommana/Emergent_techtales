@@ -143,10 +143,11 @@ Focus on making the story engaging and the visual cues very specific."""
             raise HTTPException(status_code=500, detail=f"Story generation failed: {str(e)}")
 
 class ImageAgent:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str = None):
         self.api_key = api_key
         self.hf_api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-        self.headers = {"Authorization": f"Bearer {api_key}"}
+        # For free tier, we can use without auth or with a free token
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key and api_key != "hf_dummy_token_for_free_inference" else {}
     
     async def generate_images(self, visual_cues: List[str]) -> ImageResponse:
         """Generate images based on visual cues using Hugging Face Stable Diffusion"""
@@ -176,7 +177,7 @@ class ImageAgent:
                             self.hf_api_url,
                             headers=self.headers,
                             json=payload,
-                            timeout=aiohttp.ClientTimeout(total=30)
+                            timeout=aiohttp.ClientTimeout(total=60)
                         ) as response:
                             
                             if response.status == 200:
@@ -187,15 +188,15 @@ class ImageAgent:
                                 logger.info(f"Generated image for cue: {cue}")
                             elif response.status == 503:
                                 # Model is loading, wait and retry
-                                logger.warning(f"Model loading for cue '{cue}', retrying in 10 seconds...")
-                                await asyncio.sleep(10)
+                                logger.warning(f"Model loading for cue '{cue}', retrying in 20 seconds...")
+                                await asyncio.sleep(20)
                                 
                                 # Retry once
                                 async with session.post(
                                     self.hf_api_url,
                                     headers=self.headers,
                                     json=payload,
-                                    timeout=aiohttp.ClientTimeout(total=30)
+                                    timeout=aiohttp.ClientTimeout(total=60)
                                 ) as retry_response:
                                     
                                     if retry_response.status == 200:
@@ -206,7 +207,8 @@ class ImageAgent:
                                     else:
                                         logger.error(f"Retry failed for cue '{cue}': {retry_response.status}")
                             else:
-                                logger.error(f"Image generation failed for cue '{cue}': {response.status}")
+                                response_text = await response.text()
+                                logger.error(f"Image generation failed for cue '{cue}': {response.status} - {response_text}")
                                 
                     except Exception as e:
                         logger.error(f"Image generation error for cue '{cue}': {str(e)}")
