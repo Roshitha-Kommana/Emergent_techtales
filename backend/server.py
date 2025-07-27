@@ -213,9 +213,17 @@ Make questions engaging and educational."""
             response = await chat.send_message(user_message)
             logger.info(f"Quiz response: {response}")
             
-            # Parse the JSON response
+            # Parse the JSON response (handle markdown code blocks)
             try:
-                parsed_response = json.loads(response)
+                # Clean the response - remove markdown code blocks if present
+                clean_response = response.strip()
+                if clean_response.startswith('```json'):
+                    clean_response = clean_response[7:]  # Remove ```json
+                if clean_response.endswith('```'):
+                    clean_response = clean_response[:-3]  # Remove ```
+                clean_response = clean_response.strip()
+                
+                parsed_response = json.loads(clean_response)
                 questions = []
                 for q in parsed_response["questions"]:
                     questions.append(QuizQuestion(
@@ -225,7 +233,7 @@ Make questions engaging and educational."""
                         explanation=q["explanation"]
                     ))
                 return QuizResponse(questions=questions)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 # Fallback questions if JSON parsing fails
                 return QuizResponse(questions=[
                     QuizQuestion(
